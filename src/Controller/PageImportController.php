@@ -224,17 +224,14 @@ class PageImportController
                             continue;
                         }
 
-                        if ('pid' === $key && $pageCounter > 0) {
-                            // $lastPid = $key;
-                            if(!$this->replacementIds['pagePid'.$value]) {
-                                $this->replacementIds['pagePid'.$value] = $value;
-                            }
-
-                            $pageModel->pid = $this->replacementIds['pagePid'.$value];
-                            continue;
-                        }
-
                         $pageModel->{$key} = $value;
+                    }
+
+                    if ($pageCounter == 0) {
+                        $pageModel->pid = 1;
+                    }
+                    else {
+                        $pageModel->pid = 100000;
                     }
 
                     // write model to db
@@ -242,6 +239,36 @@ class PageImportController
 
                     $this->replacementIds['pagePid'.$lastId] = $pageModel->id;
                     ++$pageCounter;
+                }
+            }
+        }
+
+        foreach ($filesModel as $fileModel) {
+            if ('file' === $fileModel->type) {
+                if (0 === strpos($fileModel->name, 'page')) {
+                    $modelArr = $this->getModelFileContent($fileModel->path);
+
+                    $oldId = $this->replacementIds['pagePid' . $modelArr['id']];
+                    $pageModel = PageModel::findByPk($oldId);
+
+                    if ($pageModel == null) {
+                        continue;
+                    }
+
+                    try {
+                        $newPid = $this->replacementIds['pagePid' . $modelArr['pid']];
+                    }
+                    catch(Exception $exception) {
+                        continue;
+                    }
+
+                    if ($newPid === null) {
+                        continue;
+                    }
+
+                    $pageModel->pid = $newPid;
+
+                    $pageModel->save();
                 }
             }
         }
