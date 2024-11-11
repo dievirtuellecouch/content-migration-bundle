@@ -62,7 +62,8 @@ class ModelExporter
     {
         $objUser = BackendUser::getInstance();
 
-        $strFolder = self::$storagePath.'/'.$objUser->username;
+        // $strFolder = self::$storagePath.'/'.$objUser->username;
+        $strFolder = self::$storagePath.'/_export';
 
         // create user folder if not exists
         if (!is_dir($strFolder)) {

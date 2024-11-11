@@ -28,7 +28,7 @@
     "require": {
         "php": "^7.4 || ^8.0",
         "ausi/slug-generator": "^1.1",
-        "contao/core-bundle": "^4.4"
+        "contao/core-bundle": "^4.4 || ^5.3"
     },
     "conflict": {
         "contao/core": "*",

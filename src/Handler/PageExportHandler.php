@@ -16,12 +16,13 @@ declare(strict_types=1);
  * file that was distributed with this source code.
  */
 
-namespace Pdir\ContentMigrationBundle\Controller;
+namespace Pdir\ContentMigrationBundle\Handler;
 
 use Contao\ArticleModel;
 use Contao\BackendTemplate;
 use Contao\ContentModel;
 use Contao\Controller;
+use Contao\CoreBundle\Controller\AbstractBackendController;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\Database;
 use Contao\Environment;
@@ -29,43 +30,18 @@ use Contao\File;
 use Contao\Message;
 use Contao\ModuleModel;
 use Contao\PageModel;
+use Contao\FormModel;
+use Contao\FormFieldModel;
+use Symfony\Component\HttpFoundation\ParameterBag;
 use Contao\System;
 use Contao\TextField;
 use Pdir\ContentMigrationBundle\Exporter\ModelExporter;
-use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\RequestStack;
 
-class PageExportController
+class PageExportHandler
 {
-    private ContaoFramework $framework;
-
-    private RequestStack $requestStack;
-
-    /**
-     * ExportController constructor.
-     */
-    public function __construct(ContaoFramework $framework, RequestStack $requestStack)
-    {
-        $this->framework = $framework;
-        $this->requestStack = $requestStack;
-    }
-
-    /**
-     * Run the controller.
-     *
-     * @codeCoverageIgnore
-     */
-    public function run(): string
-    {
-        $formId = 'tl_page_export';
-
-        $request = $this->requestStack->getCurrentRequest();
-
-        if ($request->request->get('FORM_SUBMIT') === $formId) {
-            $this->processForm($request);
-        }
-
-        return $this->getTemplate($formId)->parse();
+    public function __construct(
+        private ContaoFramework $framework
+    ) {
     }
 
     /**
@@ -75,11 +51,11 @@ class PageExportController
      *
      * @throws \Exception
      */
-    protected function processForm(Request $request): void
+    public function processForm(ParameterBag $parameters): void
     {
         $userFolder = ModelExporter::getCurrentUserFolder();
 
-        $folder = $request->get('exportName');
+        $folder = $parameters->get('exportName');
         $userFolder .= '/'.('' !== $folder ? $folder : uniqid());
 
         $pageCounter = 0;
@@ -87,17 +63,15 @@ class PageExportController
         $elementCounter = 0;
         $pages = null;
 
-        $exportType = $request->get('type');
-        $pageId = $request->get('pageId') ?? null;
+        $exportType = $parameters->get('type');
+        $pageId = $parameters->get('pageId') ?? null;
 
         switch ($exportType) {
             case 'full':
                 try {
                     $pages = $this->getPages($pageId);
                 } catch (ExportException $e) {
-                    /** @var Message $message */
-                    $message = $this->framework->getAdapter(Message::class);
-                    $message->addError($e->getMessage());
+                    echo $e->getMessage();
                 }
                 break;
 
@@ -106,9 +80,7 @@ class PageExportController
                 break;
 
             case 'content':
-                /** @var Message $message */
-                $message = $this->framework->getAdapter(Message::class);
-                $message->addError('Not available yet.');
+                echo 'Export type not available yet.';
                 break;
         }
 
@@ -177,86 +149,43 @@ class PageExportController
 
                 ++$pageCounter;
             }
-
-            $message = $this->framework->getAdapter(Message::class);
-            $message->addConfirmation(sprintf($GLOBALS['TL_LANG']['tl_page']['export_message']['complete'], $pageCounter, $articleCounter, $elementCounter, $userFolder));
         }
-
-        /** @var Controller $controller */
-        $controller = $this->framework->getAdapter(Controller::class);
-        $controller->reload();
     }
 
-    /**
-     * Get the template.
-     *
-     * @codeCoverageIgnore
-     *
-     * @throws \Exception
-     */
-    protected function getTemplate(string $formId): BackendTemplate
+    public function exportForms(ParameterBag $parameters): void
     {
-        /**
-         * @var Environment
-         * @var Message     $message
-         * @var System      $system
-         */
-        $environment = $this->framework->getAdapter(Environment::class);
-        $message = $this->framework->getAdapter(Message::class);
-        $system = $this->framework->getAdapter(System::class);
+        $userFolder = ModelExporter::getCurrentUserFolder();
 
-        /** @var AttributeBagInterface $objSession */
-        $objSession = System::getContainer()->get('session')->getBag('contao_backend');
-        $intNode = $objSession->get('tl_page_node');
+        $folder = $parameters->get('exportName');
+        $userFolder .= '/'.('' !== $folder ? $folder : uniqid());
 
-        $template = new BackendTemplate('be_page_export');
-        $template->backUrl = $system->getReferer();
-        $template->action = $environment->get('request');
-        $template->formId = $formId;
-        $template->typeOptions = $this->generateTypeOptions();
-        $template->message = $message->generate();
-        $template->currentUserFolder = ModelExporter::getCurrentUserFolder();
+        $excludeFormIds = $parameters->get('excludeFormIds') ?? [];
 
-        //// widgets
-        // page id widget
-        if (0 !== $intNode) {
-            $widgetPageId = new TextField();
+        $forms = FormModel::findAll();
 
-            $widgetPageId->label = $GLOBALS['TL_LANG']['tl_page']['export_pageId'][0];
-            $widgetPageId->name = 'pageId';
-            $widgetPageId->value = $intNode ?? null;
+        foreach ($forms as $form) {
+            if (\in_array($form->id, $excludeFormIds)) {
+                continue;
+            }
 
-            $template->widgetPageId = $widgetPageId->parse();
+            $this->saveSerializeFile(
+                $userFolder,
+                ['id' . $this->withLeadingZeroes((string) $form->id)],
+                $form->row(),
+                'form'
+            );
+
+            $formFields = FormFieldModel::findByPid($form->id);
+
+            foreach ($formFields as $formField) {
+                $this->saveSerializeFile(
+                    $userFolder,
+                    ['pid' . $this->withLeadingZeroes((string) $form->id), 'id' . $this->withLeadingZeroes((string) $formField->id)],
+                    $formField->row(),
+                    'formfield'
+                );
+            }
         }
-
-        return $template;
-    }
-
-    /**
-     * Generate the import type options.
-     *
-     * @codeCoverageIgnore
-     */
-    protected function generateTypeOptions(): array
-    {
-        $options = [];
-
-        foreach ($GLOBALS['TL_LANG']['tl_page']['export_typeRef'] as $alias => &$label) {
-            $options[$alias] = $GLOBALS['TL_LANG']['tl_page']['export_typeRef'][$alias];
-        }
-        unset($label);
-
-        return $options;
-    }
-
-    /**
-     * Generate the options.
-     *
-     * @codeCoverageIgnore
-     */
-    protected function generateOptions(): array
-    {
-        return [];
     }
 
     protected function getPages($page = null)
